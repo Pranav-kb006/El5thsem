@@ -5,3 +5,4 @@ cognisync_datasets/data/raw/
 opencode_push.log
 src/__pycache__/
 *.pyc
+run_*.log

@@ -1,6 +1,6 @@
 ---
 title: "Recommender Plan — Ranking and Fallback Policy"
-doc_id: "marketing/recommender-plan"
+doc_id: "plans/recommender-plan"
 version: "1.0"
 status: "draft"
 owner: "ML workstream"
@@ -8,8 +8,8 @@ created: "2026-11-12"
 last_updated: "2026-11-12"
 scope: "M14–M16 — availability filtering, recommendation scoring, ranking"
 related:
-  - "marketing/model_plan.md"
-  - "marketing/personalisation.md"
+  - "plans/model_plan.md"
+  - "plans/personalisation.md"
   - "benchmarks/evaluation_protocol.md"
 ---
 

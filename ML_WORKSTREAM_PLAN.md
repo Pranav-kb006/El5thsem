@@ -25,7 +25,7 @@
 
 ### Primary — OULAD (offline benchmark only)
 - Files: `assessments.csv`, `courses.csv`, `studentAssessment.csv`, `studentInfo.csv`, `studentRegistration.csv`, `OULAD.names`
-- PRD constraint honoured: `vle.csv` is NOT used (PRD explicitly says individual VLE engagement features must not be assumed). No fatigue labels, no stress/mood.
+- `studentVle.csv` (daily clicks) **is** in the team's dataset zip, although PRD v1.2 §8.2 says it was not uploaded. It is used as an optional engagement feature group (`--with-vle`) so the OULAD benchmark can run the PRD's core score-only vs. context-aware comparison. `vle.csv` (resource metadata) is not used. No fatigue labels, no stress/mood.
 - Constraint: OULAD is a **benchmark only** — never deployed as the CogniSync model.
 
 ### Future (not yet collected) — CogniSync data
@@ -47,7 +47,7 @@
 ### Step 1 — OULAD data audit & prep (1 session)
 - Load `studentAssessment.csv`, `studentInfo.csv`, `courses.csv`, `assessments.csv`, `studentRegistration.csv`, `OULAD.names`
 - Parse: eligible score records (not null, not banked), course/presentation keys, dates
-- **Decide** whether `vle.csv` is available on the machine; PRD says do **not** depend on it
+- `studentVle.csv` is available; engagement features are optional (`--with-vle`) and reported as a separate run
 - Build chronological, student-referenced training rows
 - Deliverable: cleaned OULAD benchmark table (one row per prior-assessment window)
 
@@ -69,7 +69,7 @@
 - Only after consented quiz/session records exist
 - Baselines: last-score (same topic), topic-mean, overall student mean (labelled when topic history missing)
 - Candidates: Ridge / Random Forest / XGBoost
-- Movie: feature-only model vs context-aware model (study history + workload + optional sleep/activity + commute); ablation to measure incremental value of each feature group
+- Compare: score-only model vs context-aware model (study history + workload + optional sleep/activity + commute); ablation to measure incremental value of each feature group
 - Time-aware split (by quiz timestamp), student-level holdout — never random row split
 
 ### Step 5 — Delayed retention model (M9, M10, M11)
@@ -102,9 +102,9 @@
 1. `docs/benchmarks/M5_OULAD_report.md` — baselines + Ridge/RF/XGBoost results
 2. `src/ml/oulad_benchmark.py` — reproducible OULAD benchmark
 3. `src/ml/pipeline.py` — point-in-time feature generation + leakage test
-4. `docs/marketing/model_plan.md` — next-quiz + delayed-retention model plan (data-ready)
-5. `docs/marketing/personalisation.md` — calibration + drift policy
-6. `docs/marketing/recommender_plan.md` — ranking + fallback policy
+4. `docs/plans/model_plan.md` — next-quiz + delayed-retention model plan (data-ready)
+5. `docs/plans/personalisation.md` — calibration + drift policy
+6. `docs/plans/recommender_plan.md` — ranking + fallback policy
 7. `docs/benchmarks/evaluation_protocol.md` — metrics, splits, ablation template
 
 ---
