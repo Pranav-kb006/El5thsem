@@ -22,13 +22,20 @@ Put OULAD at `cognisync_datasets/data/raw/oulad/` (the layout of the team's data
 pip install -r requirements.txt
 
 # score history + metadata
-python src/ml/oulad_benchmark.py --out-json docs/benchmarks/oulad_results.json --report docs/benchmarks/M5_OULAD_report.md
+python src/ml/oulad_benchmark.py --out-json docs/benchmarks/oulad_results.json --report docs/benchmarks/M5_OULAD_report.md \
+    --out-preds docs/benchmarks/oulad_test_predictions.csv.gz
 
 # same + VLE engagement features (the score-only vs. context-aware comparison)
-python src/ml/oulad_benchmark.py --with-vle --out-json docs/benchmarks/oulad_results_vle.json --report docs/benchmarks/M5_OULAD_report_vle.md
+python src/ml/oulad_benchmark.py --with-vle --out-json docs/benchmarks/oulad_results_vle.json --report docs/benchmarks/M5_OULAD_report_vle.md \
+    --out-preds docs/benchmarks/oulad_test_predictions_vle.csv.gz
+
+# self-check for the prediction-range helpers
+python tests/test_intervals.py
 ```
 
 Each run takes several minutes, mostly the leakage suite and the tree models. `--skip-leakage` makes a quick run; `--horizon-days N` changes how far before each deadline the prediction is made (default 7).
+
+Every prediction also gets an 80% range (split conformal, calibrated on the validation cohort per assessment type); the report shows how often test scores actually fall inside it. `--out-preds` saves one row per test attempt with each model's prediction and range, for paired comparisons.
 
 ## Protocol in one paragraph
 

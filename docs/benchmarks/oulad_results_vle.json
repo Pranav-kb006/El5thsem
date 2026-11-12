@@ -255,8 +255,8 @@
         "candidate": "min_samples_leaf=3",
         "n": 30477,
         "mae": 10.070497635764344,
-        "rmse": 13.613729468051488,
-        "r2": 0.4647281596844661,
+        "rmse": 13.61372946805149,
+        "r2": 0.464728159684466,
         "bias": -0.3886686407136877,
         "abs_err_p90": 20.89801641691644
       },
@@ -266,8 +266,8 @@
         "mae": 10.0112388914594,
         "rmse": 13.575167946071662,
         "r2": 0.4677562298005451,
-        "bias": -0.2250519062070746,
-        "abs_err_p90": 20.82483972065374
+        "bias": -0.2250519062070748,
+        "abs_err_p90": 20.82483972065372
       },
       {
         "candidate": "min_samples_leaf=10",
@@ -275,7 +275,7 @@
         "mae": 9.973937832239764,
         "rmse": 13.556855649679918,
         "r2": 0.46919120752501475,
-        "bias": -0.05767743074886144,
+        "bias": -0.057677430748861405,
         "abs_err_p90": 20.801019922278197
       },
       {
@@ -284,7 +284,7 @@
         "mae": 9.968690654006016,
         "rmse": 13.565025325761168,
         "r2": 0.4685512593458325,
-        "bias": 0.022915965274529337,
+        "bias": 0.022915965274529188,
         "abs_err_p90": 20.81832083294032
       }
     ],
@@ -378,7 +378,7 @@
       "rmse": 13.781796116350051,
       "r2": 0.3904573411842803,
       "bias": -1.0798214318706387,
-      "abs_err_p90": 21.98800363817558
+      "abs_err_p90": 21.988003638175567
     },
     "XGBoost": {
       "n": 38112,
@@ -489,9 +489,9 @@
       "mean": -1.0798214318706387,
       "std": 13.739428294798667,
       "p05": -20.982176437704126,
-      "p25": -8.644571025899534,
+      "p25": -8.644571025899545,
       "p50": -2.2416582484752112,
-      "p75": 5.374606675916397,
+      "p75": 5.3746066759164,
       "p95": 23.286740875434877,
       "share_abs_gt_10": 0.3708280856423174,
       "share_abs_gt_20": 0.12240239294710327
@@ -507,6 +507,172 @@
       "share_abs_gt_10": 0.36426847187237615,
       "share_abs_gt_20": 0.11948992443324936
     }
+  },
+  "prediction_intervals": {
+    "level": 0.8,
+    "method": "split conformal (absolute residual), per assessment type, calibrated on validation",
+    "rows": [
+      {
+        "model": "Historical mean",
+        "assessment_type": "All",
+        "n": 38112,
+        "half_width": NaN,
+        "coverage": 0.7745067170445005,
+        "mean_width": 32.580883737859885
+      },
+      {
+        "model": "Historical mean",
+        "assessment_type": "CMA",
+        "n": 13626,
+        "half_width": 20.599999999999994,
+        "coverage": 0.8794216938206371,
+        "mean_width": 36.64757498503094
+      },
+      {
+        "model": "Historical mean",
+        "assessment_type": "Exam",
+        "n": 1648,
+        "half_width": 19.0,
+        "coverage": 0.7093446601941747,
+        "mean_width": 34.06385806749885
+      },
+      {
+        "model": "Historical mean",
+        "assessment_type": "TMA",
+        "n": 22838,
+        "half_width": 17.0,
+        "coverage": 0.7166126631053508,
+        "mean_width": 30.047532453631934
+      },
+      {
+        "model": "Last score",
+        "assessment_type": "All",
+        "n": 38112,
+        "half_width": NaN,
+        "coverage": 0.8358784634760705,
+        "mean_width": 36.713607262804366
+      },
+      {
+        "model": "Last score",
+        "assessment_type": "CMA",
+        "n": 13626,
+        "half_width": 21.0,
+        "coverage": 0.8538088947600176,
+        "mean_width": 35.66431821517687
+      },
+      {
+        "model": "Last score",
+        "assessment_type": "Exam",
+        "n": 1648,
+        "half_width": 23.0,
+        "coverage": 0.7870145631067961,
+        "mean_width": 40.18385922330097
+      },
+      {
+        "model": "Last score",
+        "assessment_type": "TMA",
+        "n": 22838,
+        "half_width": 22.0,
+        "coverage": 0.8287065417286977,
+        "mean_width": 37.089237236185305
+      },
+      {
+        "model": "Ridge",
+        "assessment_type": "All",
+        "n": 38112,
+        "half_width": NaN,
+        "coverage": 0.7663727959697733,
+        "mean_width": 30.124149052409077
+      },
+      {
+        "model": "Ridge",
+        "assessment_type": "CMA",
+        "n": 13626,
+        "half_width": 16.79164579877623,
+        "coverage": 0.85938646704829,
+        "mean_width": 30.513562494960887
+      },
+      {
+        "model": "Ridge",
+        "assessment_type": "Exam",
+        "n": 1648,
+        "half_width": 20.257625110241406,
+        "coverage": 0.8379854368932039,
+        "mean_width": 40.05948710430822
+      },
+      {
+        "model": "Ridge",
+        "assessment_type": "TMA",
+        "n": 22838,
+        "half_width": 15.022952828388028,
+        "coverage": 0.7057097819423768,
+        "mean_width": 29.174872203396877
+      },
+      {
+        "model": "Random Forest",
+        "assessment_type": "All",
+        "n": 38112,
+        "half_width": NaN,
+        "coverage": 0.7806465155331654,
+        "mean_width": 27.91845803781401
+      },
+      {
+        "model": "Random Forest",
+        "assessment_type": "CMA",
+        "n": 13626,
+        "half_width": 14.647070777367972,
+        "coverage": 0.863789813591663,
+        "mean_width": 27.26731965278162
+      },
+      {
+        "model": "Random Forest",
+        "assessment_type": "Exam",
+        "n": 1648,
+        "half_width": 19.078040547965088,
+        "coverage": 0.8197815533980582,
+        "mean_width": 36.9170991724699
+      },
+      {
+        "model": "Random Forest",
+        "assessment_type": "TMA",
+        "n": 22838,
+        "half_width": 14.138531665134039,
+        "coverage": 0.7282161310097206,
+        "mean_width": 27.657605557059938
+      },
+      {
+        "model": "XGBoost",
+        "assessment_type": "All",
+        "n": 38112,
+        "half_width": NaN,
+        "coverage": 0.784818429890848,
+        "mean_width": 27.980680865464745
+      },
+      {
+        "model": "XGBoost",
+        "assessment_type": "CMA",
+        "n": 13626,
+        "half_width": 14.776763916015625,
+        "coverage": 0.8618083076471451,
+        "mean_width": 27.283716460742667
+      },
+      {
+        "model": "XGBoost",
+        "assessment_type": "Exam",
+        "n": 1648,
+        "half_width": 18.98589324951172,
+        "coverage": 0.8197815533980582,
+        "mean_width": 36.7796167447729
+      },
+      {
+        "model": "XGBoost",
+        "assessment_type": "TMA",
+        "n": 22838,
+        "half_width": 14.265800476074219,
+        "coverage": 0.7363604518784482,
+        "mean_width": 27.761580710006434
+      }
+    ]
   },
   "error_by_assessment_type": [
     {
@@ -631,26 +797,26 @@
       "assessment_type": "CMA",
       "n": 13626,
       "MAE": 8.275520344957215,
-      "RMSE": 11.669956892393861,
-      "R2": 0.47563017373181504,
-      "bias": 0.0498274793726713,
+      "RMSE": 11.66995689239386,
+      "R2": 0.47563017373181526,
+      "bias": 0.0498274793726715,
       "err_sd": 11.66985051715018,
       "err_p10": -11.700639194978677,
-      "err_p90": 12.707431606680537,
-      "p90_abs_err": 17.05191221702301
+      "err_p90": 12.707431606680544,
+      "p90_abs_err": 17.051912217023002
     },
     {
       "model": "Random Forest",
       "assessment_type": "Exam",
       "n": 1648,
       "MAE": 11.478839306926837,
-      "RMSE": 14.323229993000137,
-      "R2": 0.5450100585312464,
-      "bias": 1.3494093820663375,
+      "RMSE": 14.323229993000135,
+      "R2": 0.5450100585312465,
+      "bias": 1.3494093820663382,
       "err_sd": 14.259523545756007,
       "err_p10": -15.768346349914578,
-      "err_p90": 20.489721055713208,
-      "p90_abs_err": 23.495867999768965
+      "err_p90": 20.4897210557132,
+      "p90_abs_err": 23.49586799976895
     },
     {
       "model": "Random Forest",
@@ -659,11 +825,11 @@
       "MAE": 10.948847684456702,
       "RMSE": 14.863010889013593,
       "R2": 0.2733567119403302,
-      "bias": -1.929106327481878,
+      "bias": -1.9291063274818776,
       "err_sd": 14.737287452723653,
-      "err_p10": -17.904852661778566,
+      "err_p10": -17.904852661778577,
       "err_p90": 15.79608802672669,
-      "p90_abs_err": 24.111104198956625
+      "p90_abs_err": 24.111104198956614
     },
     {
       "model": "XGBoost",
@@ -881,5 +1047,5 @@
     "text": "Best model XGBoost: MAE 9.878 vs last-score 12.979 (+23.89%). Gate (beat last score by >=3% MAE): GO.",
     "best_model": "XGBoost"
   },
-  "runtime_seconds": 249.6
+  "runtime_seconds": 231.6
 }

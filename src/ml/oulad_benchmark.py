@@ -57,6 +57,28 @@ XGB_DEPTHS = (3, 4, 6, 8)
 XGB_JOBS = 4  # 16-core box: n_jobs=-1 is ~19x slower for hist on this machine
 
 MODEL_ORDER = ["Historical mean", "Last score", "Ridge", "Random Forest", "XGBoost"]
+INTERVAL_LEVEL = 0.80  # target share of test scores inside the range
+MIN_GROUP_ROWS = 200  # assessment types with fewer validation rows use the pooled width
+
+
+def conformal_halfwidths(abs_resid: np.ndarray, groups: np.ndarray, level: float = INTERVAL_LEVEL) -> dict:
+    """Split-conformal half-width per group, from held-out absolute residuals."""
+
+    def q(r: np.ndarray) -> float:
+        n = len(r)
+        return float(np.quantile(r, min(1.0, np.ceil((n + 1) * level) / n), method="higher"))
+
+    widths = {"__all__": q(abs_resid)}
+    for g in np.unique(groups):
+        r = abs_resid[groups == g]
+        if len(r) >= MIN_GROUP_ROWS:
+            widths[str(g)] = q(r)
+    return widths
+
+
+def apply_intervals(pred: np.ndarray, groups: np.ndarray, widths: dict) -> tuple[np.ndarray, np.ndarray]:
+    h = np.array([widths.get(str(g), widths["__all__"]) for g in groups])
+    return np.clip(pred - h, 0.0, 100.0), np.clip(pred + h, 0.0, 100.0)
 
 
 # --------------------------------------------------------------------------- #
@@ -155,11 +177,12 @@ def fit_ridge(train: pd.DataFrame, val: pd.DataFrame) -> tuple[Pipeline, dict, p
             [("pre", preprocessor(scale_numeric=True)), ("model", Ridge(alpha=alpha))]
         )
         model.fit(train[pit.FEATURE_COLUMNS], ytr)
-        metrics = regression_metrics(yva, model.predict(val[pit.FEATURE_COLUMNS]))
+        pred = model.predict(val[pit.FEATURE_COLUMNS])
+        metrics = regression_metrics(yva, pred)
         rows.append({"candidate": f"alpha={alpha:g}", **metrics})
         if best is None or metrics["mae"] < best[0]:
-            best = (metrics["mae"], model, {"alpha": alpha})
-    return best[1], {**best[2], "val_mae": best[0]}, pd.DataFrame(rows)
+            best = (metrics["mae"], model, {"alpha": alpha}, pred)
+    return best[1], {**best[2], "val_mae": best[0]}, pd.DataFrame(rows), best[3]
 
 
 def fit_random_forest(train: pd.DataFrame, val: pd.DataFrame) -> tuple[Pipeline, dict, pd.DataFrame]:
@@ -184,11 +207,12 @@ def fit_random_forest(train: pd.DataFrame, val: pd.DataFrame) -> tuple[Pipeline,
             ]
         )
         model.fit(train[pit.FEATURE_COLUMNS], ytr)
-        metrics = regression_metrics(yva, model.predict(val[pit.FEATURE_COLUMNS]))
+        pred = model.predict(val[pit.FEATURE_COLUMNS])
+        metrics = regression_metrics(yva, pred)
         rows.append({"candidate": f"min_samples_leaf={leaf}", **metrics})
         if best is None or metrics["mae"] < best[0]:
-            best = (metrics["mae"], model, {"min_samples_leaf": leaf, "n_estimators": 300})
-    return best[1], {**best[2], "val_mae": best[0]}, pd.DataFrame(rows)
+            best = (metrics["mae"], model, {"min_samples_leaf": leaf, "n_estimators": 300}, pred)
+    return best[1], {**best[2], "val_mae": best[0]}, pd.DataFrame(rows), best[3]
 
 
 def fit_xgboost(train: pd.DataFrame, val: pd.DataFrame) -> tuple[Pipeline, dict, pd.DataFrame]:
@@ -216,11 +240,12 @@ def fit_xgboost(train: pd.DataFrame, val: pd.DataFrame) -> tuple[Pipeline, dict,
             eval_metric="mae",
         )
         model.fit(xtr, ytr, eval_set=[(xva, yva)], verbose=False)
-        metrics = regression_metrics(yva, model.predict(xva))
+        pred = model.predict(xva)
+        metrics = regression_metrics(yva, pred)
         rows.append({"candidate": f"max_depth={depth}", "best_iteration": int(model.best_iteration), **metrics})
         if best is None or metrics["mae"] < best[0]:
-            best = (metrics["mae"], model, {"max_depth": depth, "best_iteration": int(model.best_iteration)})
-    return best[1], {**best[2], "val_mae": best[0]}, pd.DataFrame(rows)
+            best = (metrics["mae"], model, {"max_depth": depth, "best_iteration": int(model.best_iteration)}, pred)
+    return best[1], {**best[2], "val_mae": best[0]}, pd.DataFrame(rows), best[3]
 
 
 def refit_and_predict(name: str, best_fit, train, val, test) -> np.ndarray:
@@ -370,6 +395,8 @@ def main() -> int:
                         help="predict this many days before each deadline")
     parser.add_argument("--with-vle", action="store_true",
                         help="add studentVle click features (score + engagement model)")
+    parser.add_argument("--out-preds", default=None,
+                        help="write per-row test predictions and ranges here (.csv or .csv.gz)")
     args = parser.parse_args()
 
     SEED = args.seed
@@ -487,6 +514,47 @@ def main() -> int:
             f"{name:<20} {fmt_ci(m['mae'], b['mae_ci95']):<28} "
             f"{fmt_ci(m['rmse'], b['rmse_ci95']):<28} {m['r2']:7.4f} {delta:>13.2f}%"
         )
+
+    section(f"6b. {INTERVAL_LEVEL:.0%} PREDICTION RANGES (split conformal per assessment type)")
+    # Widths come from validation residuals of the train-only fit; test rows never set them.
+    val_preds = {
+        "Historical mean": val["prior_mean"].to_numpy(dtype=float),
+        "Last score": val["prior_last"].to_numpy(dtype=float),
+        "Ridge": ridge_fit[3],
+        "Random Forest": rf_fit[3],
+        "XGBoost": xgb_fit[3],
+    }
+    val_groups = val["assessment_type"].to_numpy()
+    test_groups = test["assessment_type"].to_numpy()
+    interval_rows = []
+    intervals = {}
+    for name in MODEL_ORDER:
+        assert np.isfinite(val_preds[name]).all(), name
+        widths = conformal_halfwidths(np.abs(val_preds[name] - y_val), val_groups)
+        lo, hi = apply_intervals(predictions[name], test_groups, widths)
+        intervals[name] = (lo, hi)
+        inside = (y_test >= lo) & (y_test <= hi)
+        for atype in ["All", *sorted(np.unique(test_groups))]:
+            mask = np.ones(len(y_test), bool) if atype == "All" else test_groups == atype
+            interval_rows.append({
+                "model": name, "assessment_type": atype, "n": int(mask.sum()),
+                "half_width": widths.get(atype, widths["__all__"]) if atype != "All" else None,
+                "coverage": float(inside[mask].mean()), "mean_width": float((hi - lo)[mask].mean()),
+            })
+    interval_df = pd.DataFrame(interval_rows)
+    print(interval_df.to_string(index=False, float_format=lambda x: f"{x:.3f}"))
+
+    if args.out_preds:
+        cols = ["id_student", "id_assessment", "code_module", "code_presentation", "assessment_type", "score"]
+        out = test[cols].reset_index(drop=True).copy()
+        for name in MODEL_ORDER:
+            key = name.lower().replace(" ", "_")
+            out[f"{key}_pred"] = predictions[name]
+            out[f"{key}_lo"], out[f"{key}_hi"] = intervals[name]
+        path = Path(args.out_preds)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        out.to_csv(path, index=False, float_format="%.3f")
+        print(f"\nWrote per-row test predictions: {path} ({len(out):,} rows)")
 
     section("7. ERROR DISTRIBUTION BY ASSESSMENT TYPE (test)")
     type_rows = []
@@ -617,6 +685,11 @@ def main() -> int:
         "test_metrics": {k: v["test"] for k, v in per_model.items()},
         "test_bootstrap_ci": {k: v["bootstrap"] for k, v in per_model.items()},
         "test_error_distribution": {k: v["error_distribution"] for k, v in per_model.items()},
+        "prediction_intervals": {
+            "level": INTERVAL_LEVEL,
+            "method": "split conformal (absolute residual), per assessment type, calibrated on validation",
+            "rows": interval_df.to_dict(orient="records"),
+        },
         "error_by_assessment_type": type_df.to_dict(orient="records"),
         "error_by_module": module_df.to_dict(orient="records"),
         "chart_description": chart_spec,
@@ -720,6 +793,15 @@ def render_report(results, per_model, type_df, module_df, chart_rows, args) -> s
         "",
         results["go_no_go"]["text"],
         "",
+        f"## {results['prediction_intervals']['level']:.0%} prediction ranges",
+        "",
+        "Each prediction gets a range `[pred - w, pred + w]`, clipped to 0-100. The half-width `w` is the "
+        "split-conformal quantile of absolute errors on the validation cohort (2014B), set separately "
+        "for each assessment type. Coverage is the share of test scores that fall inside the range; "
+        f"the target is {results['prediction_intervals']['level']:.0%}.",
+        "",
+        markdown_table(pd.DataFrame(results["prediction_intervals"]["rows"]).fillna("")),
+        "",
         "## Error distribution by assessment type",
         "",
         markdown_table(
@@ -760,6 +842,11 @@ def render_report(results, per_model, type_df, module_df, chart_rows, args) -> s
         "into CogniSync models without a separate fairness and product review.",
         "- Per-student clustered bootstrap CIs are used because a student's attempts are "
         "not independent observations.",
+        "- Range widths are calibrated on validation errors of the train-only fit, while test "
+        "predictions come from the train+val refit, so ranges are slightly conservative. "
+        "Conformal coverage assumes validation and test errors look alike; 2014J is a later "
+        "cohort, so the measured test coverage is the real check. Coverage holds on average "
+        "over rows, not for each student.",
         "",
         "## Selected hyper-parameters",
         "",
