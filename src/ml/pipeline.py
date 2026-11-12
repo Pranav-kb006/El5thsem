@@ -5,20 +5,28 @@ Design
 Each row is one student-assessment attempt.  A row's features are generated as
 of::
 
-    prediction_time = min(date_submitted, deadline)
+    prediction_time = deadline - PREDICTION_HORIZON_DAYS
 
-i.e. the earlier of the submission timestamp and the assessment deadline.  Only
-attempts whose ``date_submitted`` is strictly earlier than that instant are
-visible.  This means the model never sees the target score, later attempts, the
-target's own outcome, or any post-deadline information.
+i.e. a fixed point before the assessment is due, which mirrors CogniSync
+predicting a quiz *before* it is taken.  The prediction instant never depends
+on when (or whether) the student submits the target, so the target's own
+submission timing cannot leak into the features.  Visible history is every
+other attempt whose ``date_submitted`` is strictly earlier than that instant;
+the target attempt itself is always excluded, even if it was submitted early.
 
-``studentInfo.final_result`` is never used.  ``vle.csv`` / ``studentVle.csv``
-are deliberately not loaded (PRD constraint: no VLE engagement features, no
-mood/stress/fatigue signals).
+Known simplification: a prior score is treated as known on its submission
+day.  Real OULAD marking takes days, so the most recent visible score may not
+have been released yet; this slightly favours the history features.
+
+``studentInfo.final_result`` is never used.  ``studentVle.csv`` daily clicks
+are an optional feature group (``load_oulad(with_vle=True)`` plus
+``enable_vle_features()``) so score-only and score + engagement models can be
+compared.  No mood/stress/fatigue signals exist in or are derived from OULAD.
 
 Public API
 ----------
-load_oulad()                    read the five permitted CSV files
+load_oulad()                    read the five assessment tables (+ studentVle)
+enable_vle_features()           add the VLE engagement feature group
 build_features()               one row per attempt, point-in-time features
 chronological_student_split()  chronological cohorts, disjoint students
 audit_point_in_time()          ordering / blocklist assertions
@@ -49,6 +57,9 @@ TRAIN_PRESENTATIONS = ("2013B", "2013J")
 VAL_PRESENTATIONS = ("2014B",)
 TEST_PRESENTATIONS = ("2014J",)
 
+# Predict this many days before the deadline (a design parameter, not a fact).
+PREDICTION_HORIZON_DAYS = 7.0
+
 NUMERIC_FEATURES = [
     # history of the same module-presentation, strictly before prediction_time
     "prior_n",
@@ -75,7 +86,6 @@ NUMERIC_FEATURES = [
     "assessment_day",
     "assessment_index_frac",
     "module_n_assessments",
-    "days_to_deadline",
     "days_since_registration",
     "module_presentation_length",
     "unregistered_before_pred",
@@ -97,6 +107,23 @@ CATEGORICAL_FEATURES = [
 
 FEATURE_COLUMNS = NUMERIC_FEATURES + CATEGORICAL_FEATURES
 
+# Optional engagement group from studentVle.csv, all strictly before prediction_time.
+VLE_FEATURES = [
+    "vle_clicks_total",
+    "vle_clicks_7d",
+    "vle_clicks_14d",
+    "vle_active_days_14d",
+    "vle_days_since_last_click",
+]
+ENROLMENT_KEY = ["id_student", "code_module", "code_presentation"]
+
+
+def enable_vle_features() -> None:
+    """Add VLE_FEATURES to the model inputs (in place, so imported references see it)."""
+    if VLE_FEATURES[0] not in NUMERIC_FEATURES:
+        NUMERIC_FEATURES.extend(VLE_FEATURES)
+        FEATURE_COLUMNS[:] = NUMERIC_FEATURES + CATEGORICAL_FEATURES
+
 # Anything matching these names must never reach the design matrix.
 FORBIDDEN_FEATURE_PATTERNS = (
     "final_result",
@@ -112,10 +139,10 @@ FORBIDDEN_FEATURE_PATTERNS = (
 # --------------------------------------------------------------------------- #
 
 
-def load_oulad(data_dir: str | Path | None = None) -> dict[str, pd.DataFrame]:
-    """Load exactly the five PRD-permitted OULAD tables.
+def load_oulad(data_dir: str | Path | None = None, with_vle: bool = False) -> dict[str, pd.DataFrame]:
+    """Load the five assessment/enrolment tables, plus daily studentVle clicks if asked.
 
-    ``vle.csv`` and ``studentVle.csv`` are intentionally not read.
+    ``vle.csv`` (resource metadata) is never read.
     """
     root = Path(data_dir) if data_dir is not None else DATA_DIR
     tables = {
@@ -128,6 +155,16 @@ def load_oulad(data_dir: str | Path | None = None) -> dict[str, pd.DataFrame]:
     # Normalise the module length column name (OULAD.names calls it "length").
     courses = tables["courses"].rename(columns={"length": "module_presentation_length"})
     tables["courses"] = courses[["code_module", "code_presentation", "module_presentation_length"]]
+    if with_vle:
+        vle = pd.read_csv(
+            root / "studentVle.csv",
+            usecols=ENROLMENT_KEY + ["date", "sum_click"],
+            dtype={"id_student": "int64", "date": "int32", "sum_click": "int32"},
+        )
+        # One row per enrolment-day; per-resource detail is not needed.
+        tables["studentVle"] = vle.groupby(ENROLMENT_KEY + ["date"], as_index=False, sort=False)[
+            "sum_click"
+        ].sum()
     return tables
 
 
@@ -220,13 +257,24 @@ def assessment_metadata(tables: dict[str, pd.DataFrame]) -> pd.DataFrame:
 # --------------------------------------------------------------------------- #
 
 
+def _visible_mask(d: np.ndarray, pred: np.ndarray) -> np.ndarray:
+    """``M[i, j]``: attempt ``j`` is visible when predicting attempt ``i``.
+
+    Visible means submitted strictly before ``i``'s prediction time and not
+    ``i`` itself (an early submission of the target is still the target).
+    """
+    m = d[None, :] < pred[:, None]
+    np.fill_diagonal(m, False)
+    return m
+
+
 def _prior_block(g: pd.DataFrame) -> pd.DataFrame:
     """Point-in-time aggregates for one student x module-presentation.
 
-    ``g`` must be sorted by ``(date_submitted, id_assessment)``.  For each row
-    the visible history is the first ``k`` rows where
-    ``date_submitted < prediction_time``.  Because the frame is sorted, that is
-    a prefix of the group, so all aggregates are O(1) from cumulative sums.
+    ``g`` must be sorted by ``(date_submitted, id_assessment)``, so visible
+    attempts keep submission order and the last visible attempt is the
+    highest visible column.  Groups hold at most a few dozen attempts, so an
+    explicit n x n visibility mask is cheap and easy to audit.
     """
     n = len(g)
     d = g["date_submitted"].to_numpy(dtype=float)
@@ -236,74 +284,61 @@ def _prior_block(g: pd.DataFrame) -> pd.DataFrame:
     deadline = g["deadline"].to_numpy(dtype=float)
     weight = g["assessment_weight"].to_numpy(dtype=float)
 
-    k = np.searchsorted(d, pred, side="left")  # number of strictly earlier attempts
+    m = _visible_mask(d, pred)
+    mf = m.astype(float)
+    k = mf.sum(axis=1)
+    has = k > 0
+    safe_k = np.maximum(k, 1.0)
 
-    cs = np.concatenate(([0.0], np.cumsum(s)))
-    csq = np.concatenate(([0.0], np.cumsum(s * s)))
-    cws = np.concatenate(([0.0], np.cumsum(weight * s)))
-    cw = np.concatenate(([0.0], np.cumsum(weight)))
-
-    safe_k = np.maximum(k, 1)
-    mean = np.where(k > 0, cs[k] / safe_k, np.nan)
-    var = np.where(k > 0, csq[k] / safe_k - mean**2, np.nan)
+    total = mf @ s
+    mean = np.where(has, total / safe_k, np.nan)
+    var = np.where(has, (mf @ (s * s)) / safe_k - mean**2, np.nan)
     std = np.sqrt(np.clip(var, 0.0, None))
+    prior_min = np.where(has, np.where(m, s[None, :], np.inf).min(axis=1), np.nan)
+    prior_max = np.where(has, np.where(m, s[None, :], -np.inf).max(axis=1), np.nan)
 
-    cummin = np.minimum.accumulate(s)
-    cummax = np.maximum.accumulate(s)
-    prior_min = np.where(k > 0, cummin[np.maximum(k - 1, 0)], np.nan)
-    prior_max = np.where(k > 0, cummax[np.maximum(k - 1, 0)], np.nan)
-    last = np.where(k > 0, s[np.maximum(k - 1, 0)], np.nan)
-    prev = np.where(k > 1, s[np.maximum(k - 2, 0)], np.nan)
-    delta_last2 = np.where(k > 1, last - prev, np.nan)
+    idx = np.arange(n)
+    last_j = np.where(m, idx[None, :], -1).max(axis=1)
+    prev_j = np.where(m & (idx[None, :] < last_j[:, None]), idx[None, :], -1).max(axis=1)
+    first_j = np.where(m, idx[None, :], n).min(axis=1)
+    last = np.where(last_j >= 0, s[np.clip(last_j, 0, None)], np.nan)
+    prev = np.where(prev_j >= 0, s[np.clip(prev_j, 0, None)], np.nan)
+    delta_last2 = last - prev
+    last_sub = np.where(last_j >= 0, d[np.clip(last_j, 0, None)], np.nan)
+    first_sub = np.where(has, d[np.clip(first_j, 0, n - 1)], np.nan)
 
+    wsum = mf @ weight
     weighted_mean = np.where(
-        k > 0,
-        np.where(cw[k] > 0, cws[k] / np.maximum(cw[k], 1e-12), mean),
+        has,
+        np.where(wsum > 0, (mf @ (weight * s)) / np.maximum(wsum, 1e-12), mean),
         np.nan,
     )
 
-    # OLS slope of score against attempt position inside the visible history.
-    positions = np.arange(n, dtype=float)
-    cxy = np.concatenate(([0.0], np.cumsum(positions * s)))
-    sx = k * (k - 1) / 2.0
-    sxx = (k - 1) * k * (2 * k - 1) / 6.0
-    num = cxy[k] - sx * cs[k] / safe_k
+    # OLS slope of score against position (0..k-1) inside the visible history.
+    pos = np.cumsum(mf, axis=1) - 1.0
+    sx = (mf * pos).sum(axis=1)
+    sxx = (mf * pos * pos).sum(axis=1)
+    sxy = (mf * pos * s[None, :]).sum(axis=1)
+    num = sxy - sx * total / safe_k
     den = sxx - sx**2 / safe_k
     slope = np.where((k > 1) & (den > 0), num / np.where(den > 0, den, 1.0), np.nan)
 
-    # Same-assessment-type history (TMA / CMA / Exam)
-    same_mean = np.full(n, np.nan)
-    same_n = np.zeros(n, dtype=float)
-    for tt in ("CMA", "TMA", "Exam"):
-        flag = types == tt
-        if not flag.any():
-            continue
-        cs_t = np.concatenate(([0.0], np.cumsum(np.where(flag, s, 0.0))))
-        cn_t = np.concatenate(([0.0], np.cumsum(flag.astype(float))))
-        val = np.where(cn_t[k] > 0, cs_t[k] / np.maximum(cn_t[k], 1.0), np.nan)
-        same_mean = np.where(flag, val, same_mean)
-        same_n = np.where(flag, cn_t[k], same_n)
-    # Fall back to overall prior mean when the student has no history of this type.
-    same_mean = np.where(np.isnan(same_mean), mean, same_mean)
+    # Same-assessment-type history (TMA / CMA / Exam); fall back to the overall mean.
+    ms = (m & (types[None, :] == types[:, None])).astype(float)
+    same_n = ms.sum(axis=1)
+    same_mean = np.where(same_n > 0, (ms @ s) / np.maximum(same_n, 1.0), mean)
 
     # Submission timeliness of the visible history.
     late_days = d - deadline
-    late_flag = (late_days > 0).astype(float)
-    clate = np.concatenate(([0.0], np.cumsum(late_flag)))
-    clate_days = np.concatenate(([0.0], np.cumsum(np.maximum(late_days, 0.0))))
-    late_rate = np.where(k > 0, clate[k] / safe_k, np.nan)
-    mean_lateness = np.where(k > 0, clate_days[k] / safe_k, np.nan)
+    late_rate = np.where(has, (mf @ (late_days > 0).astype(float)) / safe_k, np.nan)
+    mean_lateness = np.where(has, (mf @ np.maximum(late_days, 0.0)) / safe_k, np.nan)
 
-    days_since_last = np.where(k > 0, pred - d[np.maximum(k - 1, 0)], np.nan)
-    mean_gap = np.where(
-        k > 1,
-        (d[np.maximum(k - 1, 0)] - d[0]) / np.maximum(k - 1, 1),
-        np.nan,
-    )
+    days_since_last = pred - last_sub
+    mean_gap = np.where(k > 1, (last_sub - first_sub) / np.maximum(k - 1, 1.0), np.nan)
 
-    out = pd.DataFrame(
+    return pd.DataFrame(
         {
-            "prior_n": k.astype(float),
+            "prior_n": k,
             "prior_mean": mean,
             "prior_std": std,
             "prior_min": prior_min,
@@ -318,32 +353,70 @@ def _prior_block(g: pd.DataFrame) -> pd.DataFrame:
             "prior_mean_lateness": mean_lateness,
             "days_since_last_sub": days_since_last,
             "prior_mean_gap": mean_gap,
-            "last_prior_submission": np.where(k > 0, d[np.maximum(k - 1, 0)], np.nan),
+            "last_prior_submission": last_sub,
         },
         index=g.index,
     )
-    return out
 
 
 def _cross_module_block(g: pd.DataFrame) -> pd.DataFrame:
     """History of the same student across *all* modules, point-in-time."""
-    n = len(g)
-    if n == 0:
+    if len(g) == 0:
         return pd.DataFrame(columns=["prior_n_all", "prior_mean_all"], index=g.index)
-    order = np.argsort(g["date_submitted"].to_numpy(dtype=float), kind="mergesort")
-    d = g["date_submitted"].to_numpy(dtype=float)[order]
-    s = g["score"].to_numpy(dtype=float)[order]
-    pred = g["prediction_time"].to_numpy(dtype=float)[order]
-    k = np.searchsorted(d, pred, side="left")
-    cs = np.concatenate(([0.0], np.cumsum(s)))
-    safe_k = np.maximum(k, 1)
-    mean = np.where(k > 0, cs[k] / safe_k, np.nan)
+    d = g["date_submitted"].to_numpy(dtype=float)
+    s = g["score"].to_numpy(dtype=float)
+    pred = g["prediction_time"].to_numpy(dtype=float)
+    mf = _visible_mask(d, pred).astype(float)
+    k = mf.sum(axis=1)
+    mean = np.where(k > 0, (mf @ s) / np.maximum(k, 1.0), np.nan)
+    return pd.DataFrame({"prior_n_all": k, "prior_mean_all": mean}, index=g.index)
 
-    # Map the sorted arrays back to the original frame index.
+
+def _vle_block(df: pd.DataFrame, daily: pd.DataFrame) -> pd.DataFrame:
+    """Engagement features from daily VLE clicks strictly before ``prediction_time``.
+
+    OULAD logs clicks server-side, so a day without a row genuinely had zero
+    clicks (unlike a missing wearable reading).  Only "days since last click"
+    is NaN, when there has been no click yet.
+    """
+    daily = daily.sort_values(ENROLMENT_KEY + ["date"], kind="mergesort").copy()
+    group = daily.groupby(ENROLMENT_KEY, sort=False)
+    daily["cum_clicks"] = group["sum_click"].cumsum().astype(float)
+    daily["cum_days"] = (group.cumcount() + 1).astype(float)
+    daily["date"] = daily["date"].astype(float)
+    right = daily[ENROLMENT_KEY + ["date", "cum_clicks", "cum_days"]].sort_values("date", kind="mergesort")
+
+    pred = df["prediction_time"].to_numpy(dtype=float)
+
+    def as_of(t: np.ndarray) -> pd.DataFrame:
+        left = df[ENROLMENT_KEY].copy()
+        left["t"] = t
+        left["row"] = np.arange(len(df))
+        hit = pd.merge_asof(
+            left.sort_values("t", kind="mergesort"),
+            right,
+            left_on="t",
+            right_on="date",
+            by=ENROLMENT_KEY,
+            allow_exact_matches=False,  # strictly before t
+            direction="backward",
+        )
+        return hit.sort_values("row").reset_index(drop=True)
+
+    now, w7, w14 = as_of(pred), as_of(pred - 7.0), as_of(pred - 14.0)
+    total = now["cum_clicks"].fillna(0.0).to_numpy()
+    days = now["cum_days"].fillna(0.0).to_numpy()
     out = pd.DataFrame(
-        {"prior_n_all": k.astype(float), "prior_mean_all": mean}, index=g.index[order]
+        {
+            "vle_clicks_total": total,
+            "vle_clicks_7d": total - w7["cum_clicks"].fillna(0.0).to_numpy(),
+            "vle_clicks_14d": total - w14["cum_clicks"].fillna(0.0).to_numpy(),
+            "vle_active_days_14d": days - w14["cum_days"].fillna(0.0).to_numpy(),
+            "vle_days_since_last_click": pred - now["date"].to_numpy(dtype=float),
+        },
+        index=df.index,
     )
-    return out.reindex(g.index)
+    return out
 
 
 def build_features(tables: dict[str, pd.DataFrame]) -> pd.DataFrame:
@@ -356,8 +429,8 @@ def build_features(tables: dict[str, pd.DataFrame]) -> pd.DataFrame:
     if not {"deadline", "module_presentation_length"} <= set(df.columns):
         raise ValueError("tables are missing deadline metadata")
 
-    df["prediction_time"] = np.minimum(df["date_submitted"], df["deadline"])
-    df["days_to_deadline"] = df["deadline"] - df["prediction_time"]
+    # Fixed instant before the deadline: never depends on the target's own submission.
+    df["prediction_time"] = df["deadline"] - PREDICTION_HORIZON_DAYS
     df["days_since_registration"] = df["prediction_time"] - df["date_registration"]
     df["unregistered_before_pred"] = (
         df["date_unregistration"].notna() & (df["date_unregistration"] < df["prediction_time"])
@@ -385,6 +458,8 @@ def build_features(tables: dict[str, pd.DataFrame]) -> pd.DataFrame:
     cross = pd.concat(cross).sort_index()
     df = df.join(cross)
     df["prior_other_n"] = df["prior_n_all"] - df["prior_n"]
+    if "studentVle" in tables:
+        df = df.join(_vle_block(df, tables["studentVle"]))
 
     # Keep the label last so accidental leakage is easy to spot.
     meta_columns = [
@@ -529,6 +604,7 @@ def spot_check_features(
             & (attempts["code_module"] == row.code_module)
             & (attempts["code_presentation"] == row.code_presentation)
             & (attempts["date_submitted"] < row.prediction_time)
+            & (attempts["id_assessment"] != row.id_assessment)
         ]
         expected_n = float(len(hist))
         max_n_diff = max(max_n_diff, abs(expected_n - row.prior_n))
@@ -573,8 +649,18 @@ def future_invariance_check(
     cutoff_index = np.maximum((size * keep_fraction).astype(int) - 1, 0)
     kept = temp[pos <= cutoff_index].copy()
 
+    cutoff_by_key = (
+        kept.groupby("id_student", sort=False)["date_submitted"]
+        .max()
+        .rename("keep_cutoff")
+        .reset_index()
+    )
     truncated = dict(tables)
     truncated["studentAssessment"] = kept[sa.columns].copy()
+    if "studentVle" in tables:
+        # Drop each student's clicks after the same cutoff: VLE features must not move either.
+        vle = tables["studentVle"].merge(cutoff_by_key, on="id_student", how="inner")
+        truncated["studentVle"] = vle[vle["date"] <= vle["keep_cutoff"]].drop(columns="keep_cutoff")
     rebuilt = build_features(truncated)
 
     keys = ["id_student", "id_assessment"]
@@ -586,12 +672,6 @@ def future_invariance_check(
     )
     # Only rows whose prediction instant is at or before the truncation
     # boundary are expected to be identical.
-    cutoff_by_key = (
-        kept.groupby("id_student", sort=False)["date_submitted"]
-        .max()
-        .rename("keep_cutoff")
-        .reset_index()
-    )
     compare = compare.merge(cutoff_by_key, on="id_student", how="left")
     comparable = compare[compare["prediction_time"] <= compare["keep_cutoff"]]
 

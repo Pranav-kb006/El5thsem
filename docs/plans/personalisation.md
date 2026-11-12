@@ -1,6 +1,6 @@
 ---
 title: "Personalisation — Calibration and Drift Policy"
-doc_id: "marketing/personalisation"
+doc_id: "plans/personalisation"
 version: "1.0"
 status: "draft"
 owner: "ML workstream"
@@ -8,9 +8,9 @@ created: "2026-11-12"
 last_updated: "2026-11-12"
 scope: "M12 — per-student calibration"
 related:
-  - "marketing/model_plan.md"
+  - "plans/model_plan.md"
   - "benchmarks/evaluation_protocol.md"
-  - "marketing/recommender_plan.md"
+  - "plans/recommender_plan.md"
 ---
 
 # Personalisation — Calibration and Drift Policy

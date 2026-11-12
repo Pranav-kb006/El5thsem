@@ -1,6 +1,6 @@
 ---
 title: "Model Plan — Next-Quiz Score and Delayed Retention"
-doc_id: "marketing/model-plan"
+doc_id: "plans/model-plan"
 version: "1.0"
 status: "draft"
 owner: "ML workstream"
@@ -11,8 +11,8 @@ data_status: "Blocked — CogniSync quiz records not yet collected"
 related:
   - "benchmarks/M5_OULAD_report.md"
   - "benchmarks/evaluation_protocol.md"
-  - "marketing/personalisation.md"
-  - "marketing/recommender_plan.md"
+  - "plans/personalisation.md"
+  - "plans/recommender_plan.md"
 ---
 
 # Model Plan — Next-Quiz Score and Delayed Retention
@@ -341,7 +341,7 @@ Data-quality rules:
 The next-quiz model is the global model. Per-student calibration is layered on
 top only after enough observations. The full policy — EWMA residual correction,
 minimum observation count, shrinkage, caps, and drift response — is in
-`docs/marketing/personalisation.md`.
+`docs/plans/personalisation.md`.
 
 Summary:
 
@@ -398,8 +398,8 @@ No step is skipped because a later step looks more exciting.
 | Steps 2–3 — OULAD baselines and trainable benchmarks (M1–M5) | `benchmarks/M5_OULAD_report.md` |
 | Step 4 — next-quiz score model (M6–M8) | Sections 4 and 6 of this document |
 | Step 5 — delayed-retention model (M9–M11) | Sections 5 and 6 of this document |
-| Step 6 — personalisation (M12) | `marketing/personalisation.md` |
-| Step 7 — recommendation ranking (M14–M16) | `marketing/recommender_plan.md` |
+| Step 6 — personalisation (M12) | `plans/personalisation.md` |
+| Step 7 — recommendation ranking (M14–M16) | `plans/recommender_plan.md` |
 | Step 8 — evaluation protocol | `benchmarks/evaluation_protocol.md` |
 | Go / no-go gates and data readiness | Section 2 and Section 4.6 above; `benchmarks/evaluation_protocol.md` §5.3 |
 | Risks | Section 10 above |

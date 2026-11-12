@@ -9,9 +9,9 @@ last_updated: "2026-11-12"
 applies_to: "M1–M16 (OULAD benchmark and future CogniSync models)"
 related:
   - "benchmarks/M5_OULAD_report.md"
-  - "marketing/model_plan.md"
-  - "marketing/personalisation.md"
-  - "marketing/recommender_plan.md"
+  - "plans/model_plan.md"
+  - "plans/personalisation.md"
+  - "plans/recommender_plan.md"
 ---
 
 # Evaluation Protocol — Metrics, Splits, and Ablations

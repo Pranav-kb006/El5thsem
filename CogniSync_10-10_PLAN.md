@@ -1,5 +1,7 @@
 # CogniSync — 10/10 Project Makeover Plan
 
+> **Superseded.** This critique was written against PRD v1.0. PRD v1.2 is the agreed baseline and keeps several features this plan cuts (Google Health, Android commute, summarisation). Kept for history only.
+
 **Status:** Critique → Rework spec (lean MVP first)
 **Source:** `Downloads/CogniSync_PRD_v1.0.md` + extracted dataset zip
 **Verdict on v1.0:** Solid spec, 6.5/10. Over-scoped, data gap unaddressed, core signal chain unproven.
